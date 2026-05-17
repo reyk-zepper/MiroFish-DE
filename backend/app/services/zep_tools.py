@@ -13,13 +13,19 @@ import json
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 
-from zep_cloud.client import Zep
-
 from ..config import Config
 from ..utils.logger import get_logger
 from ..utils.llm_client import LLMClient
 from ..utils.locale import get_locale, t
-from ..utils.zep_paging import fetch_all_nodes, fetch_all_edges
+from .graph_memory import get_graph_provider
+
+try:
+    from zep_cloud.client import Zep
+    from ..utils.zep_paging import fetch_all_nodes, fetch_all_edges
+except ImportError:
+    Zep = None
+    fetch_all_nodes = None
+    fetch_all_edges = None
 
 logger = get_logger('mirofish.zep_tools')
 
@@ -424,10 +430,15 @@ class ZepToolsService:
     
     def __init__(self, api_key: Optional[str] = None, llm_client: Optional[LLMClient] = None):
         self.api_key = api_key or Config.ZEP_API_KEY
-        if not self.api_key:
-            raise ValueError("ZEP_API_KEY 未配置")
-        
-        self.client = Zep(api_key=self.api_key)
+        self.provider = get_graph_provider()
+        self.client = None
+        self._node_cache: Dict[str, NodeInfo] = {}
+        if Config.GRAPH_PROVIDER == 'zep_cloud':
+            if not self.api_key:
+                raise ValueError("ZEP_API_KEY is required when GRAPH_PROVIDER=zep_cloud")
+            if Zep is None:
+                raise RuntimeError("zep-cloud package is required when GRAPH_PROVIDER=zep_cloud")
+            self.client = Zep(api_key=self.api_key)
         # LLM客户端用于InsightForge生成子问题
         self._llm_client = llm_client
         logger.info(t("console.zepToolsInitialized"))
@@ -485,6 +496,11 @@ class ZepToolsService:
         """
         logger.info(t("console.graphSearch", graphId=graph_id, query=query[:50]))
         
+        # Use active graph provider. Zep Cloud can use its native semantic search;
+        # local Neo4j currently uses provider/local keyword search.
+        if self.provider.provider_name != 'zep_cloud' or self.client is None:
+            return self._local_search(graph_id, query, limit, scope)
+
         # 尝试使用Zep Cloud Search API
         try:
             search_results = self._call_with_retry(
@@ -659,18 +675,20 @@ class ZepToolsService:
         """
         logger.info(t("console.fetchingAllNodes", graphId=graph_id))
 
-        nodes = fetch_all_nodes(self.client, graph_id)
+        nodes = self.provider.get_all_nodes(graph_id)
 
         result = []
         for node in nodes:
-            node_uuid = getattr(node, 'uuid_', None) or getattr(node, 'uuid', None) or ""
-            result.append(NodeInfo(
-                uuid=str(node_uuid) if node_uuid else "",
-                name=node.name or "",
-                labels=node.labels or [],
-                summary=node.summary or "",
-                attributes=node.attributes or {}
-            ))
+            node_info = NodeInfo(
+                uuid=str(node.get('uuid', '')),
+                name=node.get('name', '') or "",
+                labels=node.get('labels', []) or [],
+                summary=node.get('summary', '') or "",
+                attributes=node.get('attributes', {}) or {}
+            )
+            result.append(node_info)
+            if node_info.uuid:
+                self._node_cache[node_info.uuid] = node_info
 
         logger.info(t("console.fetchedNodes", count=len(result)))
         return result
@@ -688,32 +706,33 @@ class ZepToolsService:
         """
         logger.info(t("console.fetchingAllEdges", graphId=graph_id))
 
-        edges = fetch_all_edges(self.client, graph_id)
+        edges = self.provider.get_all_edges(graph_id)
 
         result = []
         for edge in edges:
-            edge_uuid = getattr(edge, 'uuid_', None) or getattr(edge, 'uuid', None) or ""
             edge_info = EdgeInfo(
-                uuid=str(edge_uuid) if edge_uuid else "",
-                name=edge.name or "",
-                fact=edge.fact or "",
-                source_node_uuid=edge.source_node_uuid or "",
-                target_node_uuid=edge.target_node_uuid or ""
+                uuid=str(edge.get('uuid', '')),
+                name=edge.get('name', '') or "",
+                fact=edge.get('fact', '') or "",
+                source_node_uuid=edge.get('source_node_uuid', '') or "",
+                target_node_uuid=edge.get('target_node_uuid', '') or "",
+                source_node_name=edge.get('source_node_name'),
+                target_node_name=edge.get('target_node_name')
             )
 
             # 添加时间信息
             if include_temporal:
-                edge_info.created_at = getattr(edge, 'created_at', None)
-                edge_info.valid_at = getattr(edge, 'valid_at', None)
-                edge_info.invalid_at = getattr(edge, 'invalid_at', None)
-                edge_info.expired_at = getattr(edge, 'expired_at', None)
+                edge_info.created_at = edge.get('created_at')
+                edge_info.valid_at = edge.get('valid_at')
+                edge_info.invalid_at = edge.get('invalid_at')
+                edge_info.expired_at = edge.get('expired_at')
 
             result.append(edge_info)
 
         logger.info(t("console.fetchedEdges", count=len(result)))
         return result
     
-    def get_node_detail(self, node_uuid: str) -> Optional[NodeInfo]:
+    def get_node_detail(self, node_uuid: str, graph_id: Optional[str] = None) -> Optional[NodeInfo]:
         """
         获取单个节点的详细信息
         
@@ -726,21 +745,13 @@ class ZepToolsService:
         logger.info(t("console.fetchingNodeDetail", uuid=node_uuid[:8]))
         
         try:
-            node = self._call_with_retry(
-                func=lambda: self.client.graph.node.get(uuid_=node_uuid),
-                operation_name=t("console.fetchNodeDetailOp", uuid=node_uuid[:8])
-            )
-            
-            if not node:
-                return None
-            
-            return NodeInfo(
-                uuid=getattr(node, 'uuid_', None) or getattr(node, 'uuid', ''),
-                name=node.name or "",
-                labels=node.labels or [],
-                summary=node.summary or "",
-                attributes=node.attributes or {}
-            )
+            if node_uuid in self._node_cache:
+                return self._node_cache[node_uuid]
+            if graph_id:
+                for node in self.get_all_nodes(graph_id):
+                    if node.uuid == node_uuid:
+                        return node
+            return None
         except Exception as e:
             logger.error(t("console.fetchNodeDetailFailed", error=str(e)))
             return None
@@ -1043,7 +1054,7 @@ class ZepToolsService:
                 continue
             try:
                 # 单独获取每个相关节点的信息
-                node = self.get_node_detail(uuid)
+                node = self.get_node_detail(uuid, graph_id=graph_id)
                 if node:
                     node_map[uuid] = node
                     entity_type = next((l for l in node.labels if l not in ["Entity", "Node"]), "实体")

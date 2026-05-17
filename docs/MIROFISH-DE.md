@@ -50,7 +50,7 @@ Valid values:
 LLM_PROVIDER=local
 LOCAL_LLM_API_KEY=dummy
 LOCAL_LLM_BASE_URL=http://localhost:11434/v1
-LOCAL_LLM_MODEL=qwen2.5:14b
+LOCAL_LLM_MODEL=qwen2.5:7b-instruct
 ```
 
 ### vLLM example
