@@ -235,7 +235,8 @@ class SimulationManager:
         defined_entity_types: Optional[List[str]] = None,
         use_llm_for_profiles: bool = True,
         progress_callback: Optional[callable] = None,
-        parallel_profile_count: int = 3
+        parallel_profile_count: int = 3,
+        max_agents: Optional[int] = None
     ) -> SimulationState:
         """
         准备模拟环境（全程自动化）
@@ -286,6 +287,13 @@ class SimulationManager:
             
             state.entities_count = filtered.filtered_count
             state.entity_types = list(filtered.entity_types)
+
+            if max_agents is not None and max_agents > 0:
+                original_count = len(filtered.entities)
+                filtered.entities = filtered.entities[:max_agents]
+                filtered.filtered_count = len(filtered.entities)
+                state.entities_count = filtered.filtered_count
+                logger.info(f"Agent count limited by user setting: {original_count} -> {filtered.filtered_count}")
             
             if progress_callback:
                 progress_callback(

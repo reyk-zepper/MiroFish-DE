@@ -10,7 +10,7 @@
           </div>
           <div class="step-status">
             <span v-if="phase > 0" class="badge success">{{ $t('common.completed') }}</span>
-            <span v-else class="badge processing">{{ $t('step2.initializing') }}</span>
+            <span v-else class="badge processing">Bereit</span>
           </div>
         </div>
         
@@ -19,6 +19,43 @@
           <p class="description">
             {{ $t('step2.simInstanceDesc') }}
           </p>
+
+          <div v-if="phase === 0" class="config-detail-panel">
+            <div class="config-block">
+              <div class="config-block-header">
+                <span class="config-block-title">Simulationsgröße</span>
+                <span class="config-block-badge">MiroFish-DE</span>
+              </div>
+              <div class="config-grid">
+                <div class="config-item editable-config-item">
+                  <span class="config-item-label">Maximale Agenten</span>
+                  <input
+                    v-model.number="maxAgents"
+                    type="number"
+                    min="1"
+                    max="500"
+                    class="numeric-config-input"
+                  />
+                </div>
+                <div class="config-item editable-config-item">
+                  <span class="config-item-label">Parallel generierte Profile</span>
+                  <input
+                    v-model.number="parallelProfileCount"
+                    type="number"
+                    min="1"
+                    max="20"
+                    class="numeric-config-input"
+                  />
+                </div>
+              </div>
+              <p class="description compact-config-note">
+                Die Agentenzahl begrenzt, wie viele Entitäten aus dem Graphen zu Agenten werden. Weniger Agenten = schneller und günstiger.
+              </p>
+              <button class="action-btn primary start-prepare-btn" @click="startPrepareSimulation">
+                Vorbereitung mit diesen Einstellungen starten ➝
+              </button>
+            </div>
+          </div>
 
           <div v-if="simulationId" class="info-card">
             <div class="info-row">
@@ -671,6 +708,10 @@ let lastLoggedMessage = ''
 let lastLoggedProfileCount = 0
 let lastLoggedConfigStage = ''
 
+// Simulationsgröße
+const maxAgents = ref(30)
+const parallelProfileCount = ref(5)
+
 // 模拟轮数配置
 const useCustomRounds = ref(false) // 默认使用自动配置轮数
 const customMaxRounds = ref(40)   // 默认推荐40轮
@@ -786,7 +827,8 @@ const startPrepareSimulation = async () => {
     const res = await prepareSimulation({
       simulation_id: props.simulationId,
       use_llm_for_profiles: true,
-      parallel_profile_count: 5
+      parallel_profile_count: Math.max(1, Number(parallelProfileCount.value) || 5),
+      max_agents: Math.max(1, Number(maxAgents.value) || 30)
     })
     
     if (res.success && res.data) {
@@ -1069,10 +1111,9 @@ watch(() => props.systemLogs?.length, () => {
 })
 
 onMounted(() => {
-  // 自动开始准备流程
   if (props.simulationId) {
     addLog(t('log.step2Init'))
-    startPrepareSimulation()
+    addLog('Bitte Simulationsgröße prüfen und Vorbereitung starten.')
   }
 })
 
@@ -1488,6 +1529,26 @@ onUnmounted(() => {
   font-size: 16px;
   font-weight: 600;
   color: #1E293B;
+}
+
+.numeric-config-input {
+  width: 100%;
+  border: 1px solid #E2E8F0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1E293B;
+  background: #FFF;
+}
+
+.compact-config-note {
+  margin: 12px 0 0;
+}
+
+.start-prepare-btn {
+  margin-top: 14px;
 }
 
 /* Time Periods */
