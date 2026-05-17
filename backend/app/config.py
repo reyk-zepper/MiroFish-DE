@@ -4,7 +4,12 @@
 """
 
 import os
-from dotenv import load_dotenv
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # Allows lightweight config tests before dependencies are installed.
+    def load_dotenv(*args, **kwargs):
+        return False
 
 # 加载项目根目录的 .env 文件
 # 路径: MiroFish/.env (相对于 backend/app/config.py)
@@ -36,7 +41,7 @@ class Config:
         'local': {
             'api_key': os.environ.get('LOCAL_LLM_API_KEY', os.environ.get('LLM_API_KEY', 'dummy')),
             'base_url': os.environ.get('LOCAL_LLM_BASE_URL', os.environ.get('LLM_BASE_URL', 'http://localhost:11434/v1')),
-            'model': os.environ.get('LOCAL_LLM_MODEL', os.environ.get('LLM_MODEL_NAME', 'qwen2.5:14b')),
+            'model': os.environ.get('LOCAL_LLM_MODEL', os.environ.get('LLM_MODEL_NAME', 'qwen2.5:7b-instruct')),
         },
         'openai': {
             'api_key': os.environ.get('OPENAI_API_KEY', os.environ.get('LLM_API_KEY')),
@@ -60,8 +65,24 @@ class Config:
     LLM_BASE_URL = _ACTIVE_LLM_CONFIG['base_url']
     LLM_MODEL_NAME = _ACTIVE_LLM_CONFIG['model']
     
+    # Graph memory provider configuration
+    # MiroFish-DE defaults to a local Neo4j/Graphiti-compatible provider.
+    # zep_cloud remains available as a legacy upstream-compatible provider.
+    GRAPH_PROVIDER = os.environ.get('GRAPH_PROVIDER', 'graphiti_neo4j').lower()
+    SUPPORTED_GRAPH_PROVIDERS = {'zep_cloud', 'graphiti_neo4j'}
+
     # Zep配置
     ZEP_API_KEY = os.environ.get('ZEP_API_KEY')
+
+    # Local graph provider / Neo4j configuration
+    NEO4J_URI = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
+    NEO4J_USER = os.environ.get('NEO4J_USER', 'neo4j')
+    NEO4J_PASSWORD = os.environ.get('NEO4J_PASSWORD', 'change-me')
+    NEO4J_DATABASE = os.environ.get('NEO4J_DATABASE', 'neo4j')
+    EMBEDDING_PROVIDER = os.environ.get('EMBEDDING_PROVIDER', 'local').lower()
+    LOCAL_EMBEDDING_MODEL = os.environ.get('LOCAL_EMBEDDING_MODEL', 'nomic-embed-text')
+    LOCAL_EMBEDDING_BASE_URL = os.environ.get('LOCAL_EMBEDDING_BASE_URL', os.environ.get('LOCAL_LLM_BASE_URL', 'http://localhost:11434/v1'))
+    LOCAL_EMBEDDING_API_KEY = os.environ.get('LOCAL_EMBEDDING_API_KEY', 'ollama')
     
     # 文件上传配置
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
@@ -99,7 +120,18 @@ class Config:
             errors.append(f"LLM API key is not configured for provider '{cls.LLM_PROVIDER}'")
         if cls.LLM_PROVIDER not in cls._PROVIDER_CONFIGS:
             errors.append(f"Unknown LLM_PROVIDER '{cls.LLM_PROVIDER}'. Use one of: local, openai, openrouter, custom")
-        if not cls.ZEP_API_KEY:
+        if cls.GRAPH_PROVIDER not in cls.SUPPORTED_GRAPH_PROVIDERS:
+            errors.append(f"Unknown GRAPH_PROVIDER '{cls.GRAPH_PROVIDER}'. Use one of: zep_cloud, graphiti_neo4j")
+        if cls.GRAPH_PROVIDER == 'zep_cloud' and not cls.ZEP_API_KEY:
             errors.append("ZEP_API_KEY is not configured")
+        if cls.GRAPH_PROVIDER == 'graphiti_neo4j':
+            if not cls.NEO4J_URI:
+                errors.append("NEO4J_URI is not configured")
+            if not cls.NEO4J_USER:
+                errors.append("NEO4J_USER is not configured")
+            if not cls.NEO4J_PASSWORD:
+                errors.append("NEO4J_PASSWORD is not configured")
+            if not cls.NEO4J_DATABASE:
+                errors.append("NEO4J_DATABASE is not configured")
         return errors
 
