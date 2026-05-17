@@ -27,10 +27,38 @@ class Config:
     # JSON配置 - 禁用ASCII转义，让中文直接显示（而不是 \uXXXX 格式）
     JSON_AS_ASCII = False
     
-    # LLM配置（统一使用OpenAI格式）
-    LLM_API_KEY = os.environ.get('LLM_API_KEY')
-    LLM_BASE_URL = os.environ.get('LLM_BASE_URL', 'https://api.openai.com/v1')
-    LLM_MODEL_NAME = os.environ.get('LLM_MODEL_NAME', 'gpt-4o-mini')
+    # LLM configuration (OpenAI-compatible API format)
+    # Backwards compatible with the original LLM_* variables, plus provider profiles
+    # for local inference, OpenAI API, OpenRouter, and custom endpoints.
+    LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'custom').lower()
+
+    _PROVIDER_CONFIGS = {
+        'local': {
+            'api_key': os.environ.get('LOCAL_LLM_API_KEY', os.environ.get('LLM_API_KEY', 'dummy')),
+            'base_url': os.environ.get('LOCAL_LLM_BASE_URL', os.environ.get('LLM_BASE_URL', 'http://localhost:11434/v1')),
+            'model': os.environ.get('LOCAL_LLM_MODEL', os.environ.get('LLM_MODEL_NAME', 'qwen2.5:14b')),
+        },
+        'openai': {
+            'api_key': os.environ.get('OPENAI_API_KEY', os.environ.get('LLM_API_KEY')),
+            'base_url': os.environ.get('OPENAI_BASE_URL', os.environ.get('LLM_BASE_URL', 'https://api.openai.com/v1')),
+            'model': os.environ.get('OPENAI_MODEL', os.environ.get('LLM_MODEL_NAME', 'gpt-4o-mini')),
+        },
+        'openrouter': {
+            'api_key': os.environ.get('OPENROUTER_API_KEY', os.environ.get('LLM_API_KEY')),
+            'base_url': os.environ.get('OPENROUTER_BASE_URL', os.environ.get('LLM_BASE_URL', 'https://openrouter.ai/api/v1')),
+            'model': os.environ.get('OPENROUTER_MODEL', os.environ.get('LLM_MODEL_NAME', 'openai/gpt-4o-mini')),
+        },
+        'custom': {
+            'api_key': os.environ.get('LLM_API_KEY'),
+            'base_url': os.environ.get('LLM_BASE_URL', 'https://api.openai.com/v1'),
+            'model': os.environ.get('LLM_MODEL_NAME', 'gpt-4o-mini'),
+        },
+    }
+
+    _ACTIVE_LLM_CONFIG = _PROVIDER_CONFIGS.get(LLM_PROVIDER, _PROVIDER_CONFIGS['custom'])
+    LLM_API_KEY = _ACTIVE_LLM_CONFIG['api_key']
+    LLM_BASE_URL = _ACTIVE_LLM_CONFIG['base_url']
+    LLM_MODEL_NAME = _ACTIVE_LLM_CONFIG['model']
     
     # Zep配置
     ZEP_API_KEY = os.environ.get('ZEP_API_KEY')
@@ -68,8 +96,10 @@ class Config:
         """验证必要配置"""
         errors = []
         if not cls.LLM_API_KEY:
-            errors.append("LLM_API_KEY 未配置")
+            errors.append(f"LLM API key is not configured for provider '{cls.LLM_PROVIDER}'")
+        if cls.LLM_PROVIDER not in cls._PROVIDER_CONFIGS:
+            errors.append(f"Unknown LLM_PROVIDER '{cls.LLM_PROVIDER}'. Use one of: local, openai, openrouter, custom")
         if not cls.ZEP_API_KEY:
-            errors.append("ZEP_API_KEY 未配置")
+            errors.append("ZEP_API_KEY is not configured")
         return errors
 

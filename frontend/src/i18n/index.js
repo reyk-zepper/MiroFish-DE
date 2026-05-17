@@ -14,12 +14,14 @@ for (const path in localeFiles) {
   }
 }
 
-const savedLocale = localStorage.getItem('locale') || 'zh'
+const browserLocale = navigator.language?.split('-')?.[0]
+const defaultLocale = availableLocales.some(locale => locale.key === browserLocale) ? browserLocale : 'de'
+const savedLocale = localStorage.getItem('locale') || defaultLocale
 
 const i18n = createI18n({
   legacy: false,
   locale: savedLocale,
-  fallbackLocale: 'zh',
+  fallbackLocale: 'de',
   messages
 })
 
